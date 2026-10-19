@@ -1,0 +1,1 @@
+ALTER TABLE `documents` ADD `url` text DEFAULT '' NOT NULL;

@@ -1,0 +1,62 @@
+{
+  "version": "7",
+  "dialect": "sqlite",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "6",
+      "when": 1790544183132,
+      "tag": "0000_curious_marvel_boy",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1790544748852,
+      "tag": "0001_dazzling_the_hunter",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1790545425756,
+      "tag": "0002_complex_carnage",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "6",
+      "when": 1790546381736,
+      "tag": "0003_cultured_freak",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "6",
+      "when": 1790549034141,
+      "tag": "0004_green_bloodaxe",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "6",
+      "when": 1790549503789,
+      "tag": "0005_dusty_captain_flint",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "6",
+      "when": 1790773655930,
+      "tag": "0006_wandering_tombstone",
+      "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "6",
+      "when": 1790775697962,
+      "tag": "0007_messy_secret_warriors",
+      "breakpoints": true
+    }
+  ]
+}
