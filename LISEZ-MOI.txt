@@ -1,0 +1,12 @@
+Atelier Baggio Usinage — version du 19 octobre 2026
+
+Archive du code source correspondant à la version 27 publiée.
+Dernières modifications : plusieurs comptes administrateurs, mots de passe administrateurs de 4 caractères minimum, documents par classe et dossiers, Google Sheets pour les machines, gestion des classes et des élèves.
+
+Cette archive contient le code source et les migrations de base de données.
+Les comptes enregistrés, mots de passe, PDF et images importés restent sur le serveur et ne sont pas inclus.
+Le site nécessite une exécution serveur, une base D1 et un stockage R2.
+Ce ZIP ne peut pas être utilisé comme un site HTML autonome en double-cliquant sur un fichier ou en le déposant directement sur Netlify.
+
+Site : https://baggio-usinage.ulrickfels59.chatgpt.site
+Voir README.md et package.json pour les instructions de développement.

@@ -1,0 +1,4 @@
+import { isAdmin } from '@/lib/auth';
+import { seedClasses, setClassCredentials } from '@/lib/classes';
+import { db, jsonError } from '@/lib/data';
+export async function POST(request:Request){if(!await isAdmin())return jsonError('Accès refusé.',403);const b=await request.json() as Record<string,unknown>,id=typeof b.id==='string'?b.id:'',username=typeof b.username==='string'?b.username.trim():'',password=typeof b.password==='string'?b.password:'';if(!/^[a-zA-Z0-9_.-]{3,30}$/.test(username)||password.length<12||password.length>128)return jsonError('Identifiant de 3 à 30 caractères et mot de passe de 12 caractères minimum.');await seedClasses();if(!await db().prepare('SELECT id FROM school_classes WHERE id=?').bind(id).first())return jsonError('Classe inconnue.',404);try{await setClassCredentials(id,username,password)}catch(e){console.error(e);return jsonError('Cet identifiant est déjà utilisé.')}return Response.json({ok:true})}
