@@ -1,6 +1,7 @@
+import { env } from 'cloudflare:workers';
 import { cookies, headers } from 'next/headers';
 import { db } from './data';
-const ownerEmail='ulrickfels59@gmail.com';
+
 const encoder=new TextEncoder();
 const cookieName='atelier_admin';
 export function hex(bytes:Uint8Array){return [...bytes].map(b=>b.toString(16).padStart(2,'0')).join('')}
@@ -8,7 +9,7 @@ function fromHex(input:string){return Uint8Array.from(input.match(/.{2}/g)?.map(
 export async function digest(input:string){return hex(new Uint8Array(await crypto.subtle.digest('SHA-256',encoder.encode(input))))}
 export async function passwordHash(password:string,salt:string){const key=await crypto.subtle.importKey('raw',encoder.encode(password),'PBKDF2',false,['deriveBits']);return hex(new Uint8Array(await crypto.subtle.deriveBits({name:'PBKDF2',salt:fromHex(salt),iterations:100000,hash:'SHA-256'},key,256)))}
 export function equals(a:string,b:string){if(a.length!==b.length)return false;let n=0;for(let i=0;i<a.length;i++)n|=a.charCodeAt(i)^b.charCodeAt(i);return n===0}
-export async function ownerCanSetup(){return (await headers()).get('oai-authenticated-user-email')?.toLowerCase()===ownerEmail}
+export async function ownerCanSetup(){const supplied=(await headers()).get('x-baggio-setup-key')||'',expected=env.ADMIN_SETUP_KEY;if(!expected||supplied.length>256||!supplied)return false;return equals(await digest(supplied),await digest(expected))}
 export async function account(){return db().prepare("SELECT username,salt,hash,failed,locked_until FROM admin_accounts WHERE role='owner' LIMIT 1").first<{username:string,salt:string,hash:string,failed:number,locked_until:number}>()}
 export async function isAdmin(){const jar=await cookies();const raw=(await headers()).get('cookie')||'';const bearer=(await headers()).get('authorization')?.match(/^Bearer ([a-f0-9]{64})$/)?.[1];const token=bearer||jar.get(cookieName)?.value||raw.split(';').map(part=>part.trim()).find(part=>part.startsWith(cookieName+'='))?.slice(cookieName.length+1);if(!token||!/^[-_a-zA-Z0-9]{40,}$/.test(token))return false;const hash=await digest(token);const row=await db().prepare('SELECT username FROM admin_sessions WHERE token_hash=? AND expires_at>?').bind(hash,Date.now()).first();return !!row}
 export async function createAccount(username:string,password:string){const salt=hex(crypto.getRandomValues(new Uint8Array(24)));const hash=await passwordHash(password,salt);await db().prepare('INSERT INTO admin_accounts(username,salt,hash) VALUES (?,?,?)').bind(username,salt,hash).run()}

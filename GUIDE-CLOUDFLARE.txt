@@ -1,0 +1,43 @@
+BAGGIO — Configuration Cloudflare Workers
+
+1. Décompresser ce ZIP. Ajouter les fichiers et dossiers dans le dépôt GitHub,
+à la racine, en conservant les chemins et en remplaçant les fichiers existants.
+
+2. Dans Cloudflare, créer une base D1 appelée baggio-db.
+Initialiser UNIQUEMENT cette nouvelle base vide avec schema-cloudflare.sql,
+ou utiliser les migrations avec Wrangler après configuration.
+Ne pas exécuter ce schéma sur la base du site existant.
+
+3. Activer R2 et créer un bucket privé baggio-documents.
+R2 nécessite une activation de facturation. Vérifier les conditions et quotas
+avant de valider. Le code n'active ni abonnement ni ressource automatiquement.
+
+4. Variables de BUILD dans Cloudflare :
+BAGGIO_DATABASE_ID = UUID réel de baggio-db
+BAGGIO_WORKER_NAME = machine-de-baggio-v3
+BAGGIO_BUCKET_NAME = baggio-documents
+Les identifiants ne sont pas prédéfinis dans cette archive.
+
+5. Paramètres du projet Worker :
+Nom : machine-de-baggio-v3
+Commande de construction : pnpm run build
+Commande de déploiement : pnpm run deploy
+Commande de prévisualisation : pnpm run preview:cloudflare
+Le fichier dist/server/wrangler.json est généré lors de la construction.
+Il déclare les liaisons DB (D1) et BUCKET (R2).
+
+6. Ajouter un SECRET d'exécution ADMIN_SETUP_KEY dans les paramètres du Worker.
+Choisir une valeur longue et aléatoire (32 caractères ou plus), garder cette clé
+privée et ne jamais la mettre dans GitHub ni dans l'URL du site.
+Après déploiement, ouvrir Administration : saisir cette clé et choisir les
+identifiants du premier compte administrateur.
+Après configuration, supprimer ADMIN_SETUP_KEY du Worker pour fermer l'accès
+à la configuration/réinitialisation initiale. Les connexions ordinaires restent actives.
+
+IMPORTANT : cette configuration ouvre un NOUVEAU site avec une base vide.
+Elle ne transfère pas les comptes, PDF ou images actuellement hébergés sur Sites.
+Une migration de ces données devra être réalisée séparément.
+Le site existant n'est pas modifié.
+
+Vérifications : compilation et TypeScript réussis ; schéma SQLite validé.
+Publication sur le compte Cloudflare personnel et tests réels non effectués.
