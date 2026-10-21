@@ -20,14 +20,27 @@ const statements=[
  `CREATE TRIGGER IF NOT EXISTS stock_validate_movement BEFORE INSERT ON stock_movements BEGIN SELECT CASE WHEN NOT EXISTS(SELECT 1 FROM stock_items WHERE id=NEW.item_id AND archived=0) THEN RAISE(ABORT,'stock_item_unavailable') WHEN (SELECT quantity FROM stock_items WHERE id=NEW.item_id)+NEW.delta<0 THEN RAISE(ABORT,'stock_insufficient') WHEN (SELECT quantity FROM stock_items WHERE id=NEW.item_id)+NEW.delta>1000000 THEN RAISE(ABORT,'stock_limit') END; END`,
  `CREATE TRIGGER IF NOT EXISTS stock_apply_movement AFTER INSERT ON stock_movements BEGIN UPDATE stock_items SET quantity=quantity+NEW.delta WHERE id=NEW.item_id; UPDATE stock_movements SET balance_after=(SELECT quantity FROM stock_items WHERE id=NEW.item_id) WHERE id=NEW.id; END`
 ];
+statements.push(
+ `CREATE TABLE IF NOT EXISTS stock_counts(id TEXT PRIMARY KEY,item_id TEXT NOT NULL REFERENCES stock_items(id),expected_quantity INTEGER NOT NULL,counted_quantity INTEGER NOT NULL CHECK(counted_quantity>=0 AND counted_quantity<=1000000),actor_key TEXT NOT NULL,actor_name TEXT NOT NULL,note TEXT NOT NULL DEFAULT '',created_at TEXT NOT NULL)`,
+ `CREATE TRIGGER IF NOT EXISTS stock_validate_count BEFORE INSERT ON stock_counts BEGIN SELECT CASE WHEN NOT EXISTS(SELECT 1 FROM stock_items WHERE id=NEW.item_id AND archived=0) THEN RAISE(ABORT,'stock_item_unavailable') WHEN (SELECT quantity FROM stock_items WHERE id=NEW.item_id)<>NEW.expected_quantity THEN RAISE(ABORT,'stock_count_changed') END; END`,
+ `CREATE TRIGGER IF NOT EXISTS stock_apply_count AFTER INSERT ON stock_counts WHEN NEW.counted_quantity<>NEW.expected_quantity BEGIN INSERT INTO stock_movements(id,item_id,kind,delta,actor_key,actor_name,note,created_at) VALUES(NEW.id,NEW.item_id,'adjust',NEW.counted_quantity-NEW.expected_quantity,NEW.actor_key,NEW.actor_name,'Contrôle stock : compté '||NEW.counted_quantity||' (avant '||NEW.expected_quantity||'). '||NEW.note,NEW.created_at); END`
+);
 let ready:Promise<unknown>|undefined;
 export async function ensureStock(){if(!ready)ready=db().batch(statements.map(sql=>db().prepare(sql))).catch(e=>{ready=undefined;throw e});await ready}
 export function stockText(v:unknown,max=100){return typeof v==='string'?v.trim().slice(0,max):''}
 export function validInteger(v:unknown,min=0,max=1000000){return typeof v==='number'&&Number.isSafeInteger(v)&&v>=min&&v<=max}
 export function mutationAllowed(request:Request){const origin=request.headers.get('origin');return !origin||origin===new URL(request.url).origin}
 export async function insertMovement(b:{id:string;itemId:string;kind:string;delta:number;note:string},a:StockActor){
+ if(await db().prepare('SELECT id FROM stock_counts WHERE id=?').bind(b.id).first())throw Error('stock_request_conflict');
  // ON CONFLICT is deliberately checked before the balance trigger, even after a retry.
  const existing=await db().prepare('SELECT item_id,kind,delta,actor_key FROM stock_movements WHERE id=?').bind(b.id).first<{item_id:string;kind:string;delta:number;actor_key:string}>();
  if(existing){if(existing.item_id!==b.itemId||existing.kind!==b.kind||existing.delta!==b.delta||existing.actor_key!==a.key)throw Error('stock_request_conflict');return;}
  await db().prepare('INSERT INTO stock_movements(id,item_id,kind,delta,actor_key,actor_name,class_id,note,created_at) SELECT ?,?,?,?,?,?,?,?,? WHERE NOT EXISTS(SELECT 1 FROM stock_movements WHERE id=?)').bind(b.id,b.itemId,b.kind,b.delta,a.key,a.name,a.classId,b.note,new Date().toISOString(),b.id).run();
+}
+
+export async function recordCount(b:{id:string;itemId:string;expected:number;counted:number;note:string},a:StockActor){
+ const prior=await db().prepare('SELECT item_id,expected_quantity,counted_quantity,actor_key FROM stock_counts WHERE id=?').bind(b.id).first<{item_id:string;expected_quantity:number;counted_quantity:number;actor_key:string}>();
+ if(prior){if(prior.item_id!==b.itemId||prior.expected_quantity!==b.expected||prior.counted_quantity!==b.counted||prior.actor_key!==a.key)throw Error('stock_request_conflict');return;}
+ if(await db().prepare('SELECT id FROM stock_movements WHERE id=?').bind(b.id).first())throw Error('stock_request_conflict');
+ await db().prepare('INSERT INTO stock_counts(id,item_id,expected_quantity,counted_quantity,actor_key,actor_name,note,created_at) SELECT ?,?,?,?,?,?,?,? WHERE NOT EXISTS(SELECT 1 FROM stock_counts WHERE id=?)').bind(b.id,b.itemId,b.expected,b.counted,a.key,a.name,b.note,new Date().toISOString(),b.id).run();
 }
