@@ -1,0 +1,10 @@
+'use client';
+import {useState} from 'react';
+import {Plus} from 'lucide-react';
+import {Dialog,DialogContent,DialogHeader,DialogTitle} from '@/components/ui/dialog';
+import {toast} from 'sonner';
+export default function AddClassButton({onCreated}:{onCreated:(id:string)=>Promise<void>}){
+ const [open,setOpen]=useState(false),[label,setLabel]=useState(''),[busy,setBusy]=useState(false),[error,setError]=useState('');
+ async function create(e:React.FormEvent){e.preventDefault();if(busy)return;const name=label.trim().replace(/\s+/g,' ');if(!name){setError('Saisis le nom de la classe.');return}setBusy(true);setError('');try{const token=sessionStorage.getItem('atelier_admin_token');const headers:Record<string,string>={'Content-Type':'application/json'};if(token)headers.Authorization=`Bearer ${token}`;const r=await fetch('/api/classes',{method:'POST',headers,body:JSON.stringify({label:name})});const v=await r.json() as {id?:string;error?:string};if(!r.ok||!v.id)throw Error(v.error||'Création de la classe impossible.');setOpen(false);setLabel('');await onCreated(v.id);toast.success(`Classe « ${name} » créée.`)}catch(e){setError(e instanceof Error?e.message:'Création impossible.')}finally{setBusy(false)}}
+ return <><button type="button" className="secondary" onClick={()=>{setLabel('');setError('');setOpen(true)}}><Plus size={18}/> Ajouter une classe</button><Dialog open={open} onOpenChange={v=>{if(!busy)setOpen(v)}}><DialogContent className="form-dialog"><DialogHeader><DialogTitle>Ajouter une classe</DialogTitle></DialogHeader><p>Cette classe sera disponible dans Documents, Classes & projets et la gestion des comptes élèves.</p><form className="form-stack" onSubmit={create}><label>Nom de la classe<input autoFocus required maxLength={60} placeholder="Ex. Seconde TU 2" value={label} onChange={e=>setLabel(e.target.value)} disabled={busy}/></label>{error&&<p className="error" role="alert">{error}</p>}<button type="submit" className="primary" disabled={busy}>{busy?'Création…':'Créer la classe'}</button></form></DialogContent></Dialog></>;
+}

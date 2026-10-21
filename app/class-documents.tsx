@@ -4,6 +4,7 @@ import {FileText,FolderOpen,Plus,Trash2,UploadCloud,Pencil} from 'lucide-react';
 import {Dialog,DialogContent,DialogHeader,DialogTitle} from '@/components/ui/dialog';
 import {AlertDialog,AlertDialogAction,AlertDialogCancel,AlertDialogContent,AlertDialogDescription,AlertDialogFooter,AlertDialogHeader,AlertDialogTitle} from '@/components/ui/alert-dialog';
 import {toast} from 'sonner';
+import AddClassButton from './add-class-button';
 type SchoolClass={id:string;label:string};
 type Folder={id:string;class_id:string;title:string;description:string};
 type FileRow={id:string;folder_id:string;name:string;size:number};
@@ -18,7 +19,7 @@ export default function ClassDocuments(){
  async function upload(e:React.FormEvent<HTMLFormElement>){e.preventDefault();const file=(e.currentTarget.elements.namedItem('pdf') as HTMLInputElement).files?.[0];if(!file||!uploading)return;const form=new FormData();form.append('file',file);form.append('folderId',uploading.id);form.append('name',fileName);if(await save('/api/class-documents/file','POST',form)){setUploading(null);toast.success('PDF ajouté')}}
  async function remove(){if(!deleting)return;if(await save(`/api/class-documents/${deleting.type}?id=${encodeURIComponent(deleting.id)}`,'DELETE')){setDeleting(null);toast.success('Suppression enregistrée')}}
  const current=data?.classes.find(c=>c.id===selected),admin=data?.role==='admin';
- return <><div className="heading-row"><div><div className="eyebrow"><span/> DOCUMENTS DE CLASSE</div><h1>Documents<span className="title-dot">.</span></h1><p>{admin?'Organise les PDF de chaque classe dans des dossiers.':'Les dossiers et les PDF de ta classe.'}</p></div>{admin&&current&&<button className="primary" onClick={()=>{setEditing(null);setTitle('');setDescription('')}}><Plus size={18}/> Nouveau dossier</button>}</div>
+ return <><div className="heading-row"><div><div className="eyebrow"><span/> DOCUMENTS DE CLASSE</div><h1>Documents<span className="title-dot">.</span></h1><p>{admin?'Organise les PDF de chaque classe dans des dossiers.':'Les dossiers et les PDF de ta classe.'}</p></div>{admin&&<div className="head-actions"><AddClassButton onCreated={async id=>{await refresh();setSelected(id)}}/>{current&&<button className="primary" onClick={()=>{setEditing(null);setTitle('');setDescription('')}}><Plus size={18}/> Nouveau dossier</button>}</div>}</div>
  {error&&<div className="error" role="alert">{error} <button onClick={refresh}>Réessayer</button></div>}
  {!data&&!error&&<div className="loading">Chargement des documents…</div>}
  {admin&&data&&<label className="form-stack">Classe<select value={selected} onChange={e=>setSelected(e.target.value)}>{data.classes.map(c=><option key={c.id} value={c.id}>{c.label}</option>)}</select></label>}
