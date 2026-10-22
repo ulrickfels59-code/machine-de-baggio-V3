@@ -1,3 +1,5 @@
+import {ensureMachineTooling} from './machine-tooling';
+import {toolPosition} from './tooling-format';
 import {cookies,headers} from 'next/headers';
 import {db} from './data';
 import {isAdmin,digest} from './auth';
@@ -25,17 +27,24 @@ statements.push(
  `CREATE TRIGGER IF NOT EXISTS stock_validate_count BEFORE INSERT ON stock_counts BEGIN SELECT CASE WHEN NOT EXISTS(SELECT 1 FROM stock_items WHERE id=NEW.item_id AND archived=0) THEN RAISE(ABORT,'stock_item_unavailable') WHEN (SELECT quantity FROM stock_items WHERE id=NEW.item_id)<>NEW.expected_quantity THEN RAISE(ABORT,'stock_count_changed') END; END`,
  `CREATE TRIGGER IF NOT EXISTS stock_apply_count AFTER INSERT ON stock_counts WHEN NEW.counted_quantity<>NEW.expected_quantity BEGIN INSERT INTO stock_movements(id,item_id,kind,delta,actor_key,actor_name,note,created_at) VALUES(NEW.id,NEW.item_id,'adjust',NEW.counted_quantity-NEW.expected_quantity,NEW.actor_key,NEW.actor_name,'Contrôle stock : compté '||NEW.counted_quantity||' (avant '||NEW.expected_quantity||'). '||NEW.note,NEW.created_at); END`
 );
+statements.push(
+ `CREATE TABLE IF NOT EXISTS stock_movement_usage(id TEXT PRIMARY KEY NOT NULL REFERENCES stock_movements(id),machine_id TEXT NOT NULL,machine_name TEXT NOT NULL,tool_position TEXT NOT NULL,operation TEXT NOT NULL)`,
+ `CREATE TRIGGER IF NOT EXISTS stock_usage_retry BEFORE INSERT ON stock_movement_usage WHEN EXISTS(SELECT 1 FROM stock_movement_usage WHERE id=NEW.id AND (machine_id<>NEW.machine_id OR machine_name<>NEW.machine_name OR tool_position<>NEW.tool_position OR operation<>NEW.operation)) BEGIN SELECT RAISE(ABORT,'stock_request_conflict'); END`
+);
 let ready:Promise<unknown>|undefined;
-export async function ensureStock(){if(!ready)ready=db().batch(statements.map(sql=>db().prepare(sql))).catch(e=>{ready=undefined;throw e});await ready}
+export async function ensureStock(){if(!ready)ready=db().batch(statements.map(sql=>db().prepare(sql))).then(()=>ensureMachineTooling()).catch(e=>{ready=undefined;throw e});await ready}
 export function stockText(v:unknown,max=100){return typeof v==='string'?v.trim().slice(0,max):''}
 export function validInteger(v:unknown,min=0,max=1000000){return typeof v==='number'&&Number.isSafeInteger(v)&&v>=min&&v<=max}
 export function mutationAllowed(request:Request){const origin=request.headers.get('origin');return !origin||origin===new URL(request.url).origin}
-export async function insertMovement(b:{id:string;itemId:string;kind:string;delta:number;note:string},a:StockActor){
+export async function insertMovement(b:{id:string;itemId:string;kind:string;delta:number;note:string;usage?:{machineId:string;machineName:string;position:string;operation:string}},a:StockActor){
  if(await db().prepare('SELECT id FROM stock_counts WHERE id=?').bind(b.id).first())throw Error('stock_request_conflict');
  // ON CONFLICT is deliberately checked before the balance trigger, even after a retry.
- const existing=await db().prepare('SELECT item_id,kind,delta,actor_key FROM stock_movements WHERE id=?').bind(b.id).first<{item_id:string;kind:string;delta:number;actor_key:string}>();
- if(existing){if(existing.item_id!==b.itemId||existing.kind!==b.kind||existing.delta!==b.delta||existing.actor_key!==a.key)throw Error('stock_request_conflict');return;}
- await db().prepare('INSERT INTO stock_movements(id,item_id,kind,delta,actor_key,actor_name,class_id,note,created_at) SELECT ?,?,?,?,?,?,?,?,? WHERE NOT EXISTS(SELECT 1 FROM stock_movements WHERE id=?)').bind(b.id,b.itemId,b.kind,b.delta,a.key,a.name,a.classId,b.note,new Date().toISOString(),b.id).run();
+ const existing=await db().prepare('SELECT m.item_id,m.kind,m.delta,m.actor_key,m.note,u.machine_id,u.tool_position,u.operation FROM stock_movements m LEFT JOIN stock_movement_usage u ON u.id=m.id WHERE m.id=?').bind(b.id).first<{item_id:string;kind:string;delta:number;actor_key:string;note:string;machine_id:string|null;tool_position:string|null;operation:string|null}>();
+ if(existing){if(existing.item_id!==b.itemId||existing.kind!==b.kind||existing.delta!==b.delta||existing.actor_key!==a.key||existing.note!==b.note||(existing.machine_id||'')!==(b.usage?.machineId||'')||(existing.tool_position||'')!==(b.usage?.position||'')||(existing.operation||'')!==(b.usage?.operation||''))throw Error('stock_request_conflict');return;}
+ const queries=[db().prepare('INSERT INTO stock_movements(id,item_id,kind,delta,actor_key,actor_name,class_id,note,created_at) SELECT ?,?,?,?,?,?,?,?,? WHERE NOT EXISTS(SELECT 1 FROM stock_movements WHERE id=?)').bind(b.id,b.itemId,b.kind,b.delta,a.key,a.name,a.classId,b.note,new Date().toISOString(),b.id)];
+ if(b.usage)queries.push(db().prepare('INSERT OR IGNORE INTO stock_movement_usage(id,machine_id,machine_name,tool_position,operation) VALUES (?,?,?,?,?)').bind(b.id,b.usage.machineId,b.usage.machineName,b.usage.position,b.usage.operation));
+ if(b.usage)queries.push(db().prepare(`INSERT INTO machine_tooling(machine_id,position,tool,reference,item_id,status,source_movement_id,updated_at) SELECT ?,?,?,reference,id,'Sortie',?,? FROM stock_items WHERE id=? ON CONFLICT(machine_id,position) DO UPDATE SET tool=excluded.tool,reference=excluded.reference,item_id=excluded.item_id,status='Sortie',source_movement_id=excluded.source_movement_id,updated_at=excluded.updated_at,version=machine_tooling.version+1,supplier=CASE WHEN machine_tooling.reference=excluded.reference THEN machine_tooling.supplier ELSE '' END,teeth=CASE WHEN machine_tooling.reference=excluded.reference THEN machine_tooling.teeth ELSE NULL END,diameter=CASE WHEN machine_tooling.reference=excluded.reference THEN machine_tooling.diameter ELSE NULL END,material=CASE WHEN machine_tooling.reference=excluded.reference THEN machine_tooling.material ELSE '' END`).bind(b.usage.machineId,toolPosition(b.usage.position),b.usage.operation,b.id,new Date().toISOString(),b.itemId));
+ await db().batch(queries);
 }
 
 export async function recordCount(b:{id:string;itemId:string;expected:number;counted:number;note:string},a:StockActor){
@@ -43,4 +52,13 @@ export async function recordCount(b:{id:string;itemId:string;expected:number;cou
  if(prior){if(prior.item_id!==b.itemId||prior.expected_quantity!==b.expected||prior.counted_quantity!==b.counted||prior.actor_key!==a.key)throw Error('stock_request_conflict');return;}
  if(await db().prepare('SELECT id FROM stock_movements WHERE id=?').bind(b.id).first())throw Error('stock_request_conflict');
  await db().prepare('INSERT INTO stock_counts(id,item_id,expected_quantity,counted_quantity,actor_key,actor_name,note,created_at) SELECT ?,?,?,?,?,?,?,? WHERE NOT EXISTS(SELECT 1 FROM stock_counts WHERE id=?)').bind(b.id,b.itemId,b.expected,b.counted,a.key,a.name,b.note,new Date().toISOString(),b.id).run();
+}
+
+export type StockHistoryRow={id:string;item_id:string;reference:string;name:string;kind:string;actor_name:string;class_label:string|null;delta:number;balance_after:number;note:string;created_at:string;machine_id:string|null;machine_name:string|null;tool_position:string|null;operation:string|null};
+export async function readStockHistory(a:StockActor,filters:{itemId?:string;machineId?:string;limit?:number}={}){
+ await ensureStock();const conditions=[a.admin?'1=1':'m.actor_key=?'],args:string[]=[];
+ if(!a.admin)args.push(a.key);if(filters.itemId){conditions.push('m.item_id=?');args.push(filters.itemId)}if(filters.machineId){conditions.push('u.machine_id=?');args.push(filters.machineId)}
+ const limit=filters.limit?' LIMIT '+Math.min(10000,Math.max(1,Math.floor(filters.limit))):'';
+ const rows=await db().prepare(`SELECT m.*,i.reference,i.name,c.label AS class_label,u.machine_id,u.machine_name,u.tool_position,u.operation FROM (SELECT id,item_id,kind,delta,actor_key,actor_name,class_id,note,created_at,balance_after FROM stock_movements WHERE id NOT IN(SELECT id FROM stock_counts) UNION ALL SELECT id,item_id,'count' AS kind,counted_quantity-expected_quantity AS delta,actor_key,actor_name,NULL AS class_id,'Contrôle stock : compté '||counted_quantity||' (avant '||expected_quantity||'). '||note AS note,created_at,counted_quantity AS balance_after FROM stock_counts) m JOIN stock_items i ON i.id=m.item_id LEFT JOIN school_classes c ON c.id=m.class_id LEFT JOIN stock_movement_usage u ON u.id=m.id WHERE ${conditions.join(' AND ')} ORDER BY m.created_at DESC,m.id DESC${limit}`).bind(...args).all<StockHistoryRow>();
+ return rows.results;
 }
