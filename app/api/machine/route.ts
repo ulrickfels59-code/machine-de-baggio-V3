@@ -1,3 +1,4 @@
+import {ensureMachineTooling} from '@/lib/machine-tooling';
 import { isAdmin } from '@/lib/auth';
 import { bucket, db, jsonError, safeName } from '@/lib/data';
 export async function POST(request:Request){
@@ -14,5 +15,5 @@ export async function DELETE(request:Request){
  if(!await isAdmin())return jsonError('Accès réservé à l’administration.',403);
  const id=new URL(request.url).searchParams.get('id'); if(!id)return jsonError('Machine manquante.');
  const files=await db().prepare('SELECT key FROM documents WHERE machine_id=?').bind(id).all<{key:string}>();
- await db().prepare('DELETE FROM machines WHERE id=?').bind(id).run();for(const file of files.results)if(file.key)await bucket().delete(file.key);return Response.json({ok:true});
+ await ensureMachineTooling();try{await db().prepare('DELETE FROM machines WHERE id=?').bind(id).run()}catch(e){if((String(e)+' '+String((e as any)?.cause)).includes('tooling_machine_active'))return jsonError('Remets les outils de cette machine en stock avant de la supprimer.',409);throw e}for(const file of files.results)if(file.key)await bucket().delete(file.key);return Response.json({ok:true});
 }
