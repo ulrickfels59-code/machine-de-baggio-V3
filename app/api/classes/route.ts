@@ -1,3 +1,4 @@
+import {ensureLearning} from '@/lib/learning';
 import { isAdmin } from '@/lib/auth';
 import { classId, seedClasses } from '@/lib/classes';
 import { db, jsonError } from '@/lib/data';
@@ -21,7 +22,8 @@ export async function DELETE(request:Request){
  if(!await isAdmin())return jsonError('Accès réservé à l’administration.',403);
  const id=new URL(request.url).searchParams.get('id');if(!id)return jsonError('Classe manquante.');await seedClasses();const d=db();
  if(!await d.prepare('SELECT id FROM school_classes WHERE id=?').bind(id).first())return jsonError('Classe inconnue.',404);
- const result=await d.prepare('DELETE FROM school_classes WHERE id=? AND NOT EXISTS(SELECT 1 FROM students WHERE class_id=?) AND NOT EXISTS(SELECT 1 FROM class_projects WHERE class_id=?) AND NOT EXISTS(SELECT 1 FROM document_folders WHERE class_id=?)').bind(id,id,id,id).run();
- if(!result.meta.changes)return jsonError('Déplace ou supprime les élèves, les projets et les dossiers de cette classe avant de la supprimer.',409);
+ await ensureLearning();
+ const result=await d.prepare('DELETE FROM school_classes WHERE id=? AND NOT EXISTS(SELECT 1 FROM students WHERE class_id=?) AND NOT EXISTS(SELECT 1 FROM class_projects WHERE class_id=?) AND NOT EXISTS(SELECT 1 FROM document_folders WHERE class_id=?) AND NOT EXISTS(SELECT 1 FROM learning_tasks WHERE class_id=?)').bind(id,id,id,id,id).run();
+ if(!result.meta.changes)return jsonError('Déplace ou supprime les élèves, les projets, les activités pédagogiques et les dossiers de cette classe avant de la supprimer.',409);
  return Response.json({ok:true});
 }
