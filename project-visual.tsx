@@ -2,8 +2,9 @@
 import {useCallback,useEffect,useRef,useState} from 'react';
 import {toast} from 'sonner';
 import './project-visual.css';
+import StepUpload from './step-upload';
 type Part={id:string;label:string;state:string;assigned_student_id:string|null;assigned_name:string|null;comment:string;teacher_comment:string;version:number};
-type Snapshot={enabled:boolean;admin:boolean;studentId:string|null;model:string;parts:Part[];students:{id:string;username:string}[];history:{part_id:string;state:string;actor:string;comment:string;created_at:string}[]};
+type Snapshot={enabled:boolean;admin:boolean;studentId:string|null;model:string;modelId:string;filename:string;parts:Part[];students:{id:string;username:string}[];history:{part_id:string;state:string;actor:string;comment:string;created_at:string}[]};
 const labels:Record<string,string>={todo:'À commencer',in_progress:'En cours',to_review:'À contrôler',completed:'Validée professeur',purchased:'Composant acheté'};
 function auth(){const token=sessionStorage.getItem('atelier_admin_token')||sessionStorage.getItem('atelier_student_token');return token?{Authorization:`Bearer ${token}`} as Record<string,string>:{};}
 let viewerModule:Promise<any>|null=null;
@@ -15,20 +16,21 @@ export default function ProjectVisual({projectId,title,admin}:{projectId:string;
  useEffect(()=>{let active=true;const load=()=>refresh().catch(e=>{if(active)setError(e.message)});load();const timer=setInterval(()=>{if(!document.hidden)load()},20000);return()=>{active=false;clearInterval(timer)}},[refresh]);
  const part=data?.parts.find(p=>p.id===selected);
  useEffect(()=>{if(part){setState(part.state);setAssigned(part.assigned_student_id||'');setComment(part.comment);setTeacher(part.teacher_comment)}},[selected,part?.version]);
- useEffect(()=>{if(!data?.enabled||!host.current)return;let disposed=false;setLoading(true);setViewError('');
-  loadViewer().then(module=>{if(disposed)return null;return module.mountViewer(host.current,data.model,setSelected)}).then(v=>{if(!v)return;if(disposed)v.dispose();else{controller.current=v;setLoading(false);setModelReady(true)}}).catch(()=>{if(!disposed){setLoading(false);setViewError('Affichage 3D indisponible. Vérifie WebGL et recharge la page.')}});
-  return()=>{disposed=true;controller.current?.dispose();controller.current=null;setModelReady(false)};
+ useEffect(()=>{if(!data?.enabled||!host.current)return;let disposed=false,objectUrl='';const abort=new AbortController();setSelected('');setLoading(true);setViewError('');
+  Promise.all([loadViewer(),fetch(data.model,{headers:auth(),cache:'no-store',signal:abort.signal}).then(async r=>{if(!r.ok)throw Error('Modèle indisponible');return r.blob()})]).then(([module,blob])=>{if(disposed)return null;objectUrl=URL.createObjectURL(blob);return module.mountViewer(host.current,objectUrl,setSelected)}).then(v=>{if(!v)return;if(disposed)v.dispose();else{controller.current=v;setLoading(false);setModelReady(true)}}).catch(()=>{if(!disposed){setLoading(false);setViewError('Affichage 3D indisponible. Vérifie WebGL et recharge la page.')}});
+  return()=>{disposed=true;abort.abort();controller.current?.dispose();controller.current=null;if(objectUrl)URL.revokeObjectURL(objectUrl);setModelReady(false)};
  },[data?.enabled,data?.model]);
  useEffect(()=>{controller.current?.update(data?.parts||[],selected,isolate)},[data,selected,isolate,modelReady]);
  async function save(action='update'){
   if(!data)return;setBusy(true);try{const r=await fetch('/api/project-visual',{method:'POST',headers:{...auth(),'Content-Type':'application/json'},body:JSON.stringify({projectId,action,partId:selected,version:part?.version||0,state,assignedStudentId:assigned,comment,teacherComment:teacher})});const v=await r.json() as {error?:string};if(!r.ok){if(r.status===409)await refresh();throw Error(v.error||'Enregistrement impossible')}await refresh();toast.success(action==='enable'?'Moteur 3D activé':'Suivi de la pièce enregistré');}catch(e){toast.error(e instanceof Error?e.message:'Erreur')}finally{setBusy(false)}
  }
  if(!data){return error?<p className="error">{error} <button onClick={()=>refresh().catch(e=>setError(e.message))}>Réessayer le suivi 3D</button></p>:<p className="pv-loading">Chargement du suivi visuel…</p>}
- if(!data.enabled)return admin?<button className="secondary" onClick={()=>save('enable')} disabled={busy}>Associer le moteur Stirling 3D à ce projet</button>:null;
+ const uploadControl=data.admin?<StepUpload projectId={projectId} expectedModel={data.modelId||''} hasModel={data.enabled} onSaved={refresh}/>:null;
+ if(!data.enabled)return <section className="project-visual pv-empty"><h4>Modèle 3D du projet</h4>{uploadControl||<p>Le professeur n’a pas encore ajouté le modèle 3D.</p>}</section>;
  const manufactured=data.parts.filter(p=>p.state!=='purchased'),done=manufactured.filter(p=>p.state==='completed').length;
  const filtered=data.parts.filter(p=>(filter==='all'||filter==='manufacture'&&p.state!=='purchased'||p.state===filter)&&p.label.toLocaleLowerCase('fr').includes(query.toLocaleLowerCase('fr')));
  const mine=part?.assigned_student_id===data.studentId,canEdit=data.admin||mine&&part?.state!=='completed'&&part?.state!=='purchased';
- return <section className="project-visual" aria-label={`Suivi 3D ${title}`}><div className="pv-head"><div><h4>Projet commun · moteur Stirling en 3D</h4><p>{done} pièces validées sur {manufactured.length} à usiner · {manufactured.length?Math.round(done/manufactured.length*100):0} %</p></div><button className="secondary" onClick={()=>refresh().catch(e=>toast.error(e.message))}>Actualiser le suivi</button></div>
+ return <section className="project-visual" aria-label={`Suivi 3D ${title}`}><div className="pv-head"><div><h4>{title} · Vue 3D et avancement</h4>{data.filename&&<small>{data.filename}</small>}<p>{done} pièces validées sur {manufactured.length} à usiner · {manufactured.length?Math.round(done/manufactured.length*100):0} %</p></div><button className="secondary" onClick={()=>refresh().catch(e=>toast.error(e.message))}>Actualiser le suivi</button></div>{uploadControl}
  <progress max={Math.max(1,manufactured.length)} value={done} aria-label="Avancement du projet"/>
  <div className="pv-legend">{Object.entries(labels).map(([key,label])=><span key={key}><i className={`pv-dot pv-${key}`}/>{label}</span>)}</div>
  {error&&<p role="alert" className="error">{error}</p>}
